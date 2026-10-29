@@ -24,7 +24,8 @@ grid_from_dsn <- function(dsn, band = 1L) {
 stat_source <- function(name, files, grid = NULL) {
   stopifnot(is.character(name), nchar(name) > 0,
             all(c("date", "dsn") %in% names(files)))
-  if (is.null(files$band)) files$band <- 1L
+
+  if (!"band" %in% names(files)) files$band <- 1L
   files <- files[c("date", "dsn", "band")]
   if (is.null(grid)) grid <- grid_from_dsn(files$dsn[1], files$band[1])
   stopifnot(length(grid$dimension) == 2L, length(grid$extent) == 4L)
