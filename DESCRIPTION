@@ -1,0 +1,18 @@
+Package: grist
+Title: Mergeable Sufficient Statistics on S2 Cells from Daily Grids
+Version: 0.0.1
+Authors@R: person("Michael", "Sumner", email = "mdsumner@gmail.com",
+    role = c("aut", "cre"))
+Description: The engine extracted from trend.sst: area-weighted daily
+    grids accumulated to a global S2 discrete grid as sufficient
+    statistics (count, summed weights, weighted sums and sums of
+    squares), one Parquet file per date. A source is a catalog of
+    (date, dsn, band) plus a grid signature; a region is a cell
+    selection; every mean, variance, or rollup is exact arithmetic on
+    the sums. Deployments (product knowledge, catalogs, schedules,
+    sites) live in host repositories; this package is the invariant
+    middle.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Imports: s2, vapour, vaster, arrow, dplyr
+Suggests: mirai, jsonlite
