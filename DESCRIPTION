@@ -16,5 +16,13 @@ License: MIT + file LICENSE
 Encoding: UTF-8
 Imports: s2, vapour, vaster, arrow, dplyr
 Suggests: mirai, jsonlite
+Collate:
+    'cells.R'
+    'sources.R'
+    'mapping.R'
+    'accumulate.R'
+    'series.R'
+    'backfill.R'
+    'manifest.R'
 URL: https://github.com/hypertidy/grist
 BugReports: https://github.com/hypertidy/grist/issues
