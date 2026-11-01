@@ -34,10 +34,7 @@ A source is three things:
     stat_source(name, files, grid = NULL)
 
 - `name`: the slug that keys `mapping/<name>/` and `sums/<name>/`
-- `files`: a catalog with columns `date`, `dsn`, and optionally `band`
-  (default 1). This covers file-per-date collections (dsn varies) and
-  array stores with time-as-bands (one dsn, band = time index), e.g.
-  GDAL-readable Zarr with single-timestep chunks.
+- `files`: a catalog, one row per date (see "Catalog contract" below).
 - `grid`: the native grid signature (dimension, extent), stamped from
   the first catalog entry unless supplied. Supply it explicitly when a
   driver does not report a correct extent.
@@ -47,6 +44,48 @@ reads: `accumulate_date()` refuses to run against a mismatched
 mapping. Pixels are never warped or resampled; each is assigned whole
 to the cell containing its centre, by a dense positional mapping built
 once per grid.
+
+## Catalog contract
+
+The catalog is the boundary between grist and whatever provides the
+data. grist does not list files, reformat bytes, or build indexes: it
+reads catalogs that providers emit, as one more output alongside VRT,
+Icechunk, kerchunk or STAC. One row selects exactly one 2D field for
+one date. A row has one of two shapes, distinguished by which columns
+are present:
+
+| shape | columns | read through | use for |
+|---|---|---|---|
+| classic | `date`, `dsn`, `band` (optional, default 1) | GDAL classic raster API | one file per date (COG, netCDF via `vrt://`), or a classic view with the band selected in the dsn |
+| mdim | `date`, `dsn`, `array`, `index` | GDAL multidimensional API | a multidimensional VRT over source files (e.g. written by `gdal mdim mosaic`), or a Zarr store: open `array`, slice by `index`, read 2D |
+
+- `date`: the date the field represents (Date or ISO string).
+- `dsn`: a GDAL data source name. Any recipe GDAL can open is valid.
+- `band` (classic): 1-based band index.
+- `array` (mdim): the array name within the dataset, e.g. `temp`.
+- `index` (mdim): zero-based indices for every non-spatial dimension,
+  as `dim=i` pairs separated by commas, e.g. `time=4380,st_ocean=0`.
+  The two remaining dimensions must be the spatial ones.
+
+Rules:
+
+- Each row must resolve to a single 2D field on the source's grid
+  signature; selecting depth, ensemble member or variable is the
+  catalog's job, not grist's.
+- A classic dsn that exposes thousands of bands (a time-as-bands view
+  of an array store) is pathological through the warp path: band
+  labelling on every open and per-process block caches. Select the band
+  inside the dsn (`vrt://<dsn>?bands=i`, then `band = 1`) or use the
+  mdim shape. The mdim shape is the general route for array stores;
+  `vrt://?bands=` is a workaround for classic stacks.
+- At scale, set per-worker GDAL limits: `GDAL_CACHEMAX=256` (the default
+  is a share of node memory per process),
+  `GDAL_LOAD_EXTRA_DIM_METADATA_DELAY=0`, `GDAL_PAM_ENABLED=NO`, and
+  workers equal to allocated CPUs.
+
+Status: grist reads the classic shape today. The mdim shape is the
+specified next read path; its first user is BRAN through the bluelink
+mdim VRT.
 
 ## Onboarding ritual for a NEW source
 
