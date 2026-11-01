@@ -5,11 +5,12 @@
 ## dense mapping is correct without any culling.
 
 accumulate_date <- function(dsn, date, source, registry, band = 1L,
+                            overwrite = FALSE,
                             mapping_path = file.path("mapping", source$name),
                             out_path = file.path("sums", source$name)) {
   dir.create(out_path, recursive = TRUE, showWarnings = FALSE)
   out <- file.path(out_path, sprintf("%s.parquet", format(as.Date(date))))
-  if (file.exists(out)) return(invisible(out))
+  if (file.exists(out) && !overwrite) return(invisible(out))
 
   meta <- check_mapping(source, mapping_path)
   nreg <- nrow(registry)
@@ -46,7 +47,13 @@ accumulate_date <- function(dsn, date, source, registry, band = 1L,
                   sumwx2 = acc[touched, "sumwx2"])
   ## registry is token-sorted so d already is; atomic write
   tmp <- tempfile(tmpdir = out_path, fileext = ".tmp")
-  arrow::write_parquet(d, tmp)
+  ## provenance travels with the data: the exact source of this date's
+  ## sums, so plan_dates() can recompute a date whose catalog row has
+  ## since changed (NRT -> delayed-time, provisional -> final)
+  tab <- arrow::arrow_table(d)
+  tab$metadata$grist_dsn <- as.character(dsn)
+  tab$metadata$grist_band <- as.character(band)
+  arrow::write_parquet(tab, tmp)
   file.rename(tmp, out)
   invisible(out)
 }

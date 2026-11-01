@@ -122,6 +122,15 @@ array or any external runtime in any language. The filesystem is the
 resume state (file-per-date, atomic writes), never the scheduler:
 re-planning after any partial run yields exactly the remaining work.
 
+Each sums file records the source it was computed from (`dsn` and
+`band`, in the Parquet key-value metadata). `plan_dates()` treats a
+date as still to do when its file is missing OR when the catalog now
+gives a different source for that date. So a catalog that interleaves
+a near-real-time product with delayed-time data, or provisional files
+with their final versions, gets exactly the handed-over dates
+recomputed on the next run, with no manual deletion of trailing days.
+Files written before provenance was recorded are trusted as they are.
+
 ## What host repositories own
 
 - the source constructor and catalog build (product knowledge)
