@@ -63,9 +63,17 @@ are present:
 - `dsn`: a GDAL data source name. Any recipe GDAL can open is valid.
 - `band` (classic): 1-based band index.
 - `array` (mdim): the array name within the dataset, e.g. `temp`.
-- `index` (mdim): zero-based indices for every non-spatial dimension,
-  as `dim=i` pairs separated by commas, e.g. `time=4380,st_ocean=0`.
-  The two remaining dimensions must be the spatial ones.
+- `index` (mdim): a coordinate VALUE for every non-spatial dimension,
+  as `dim=value` pairs separated by commas, e.g.
+  `time=2005-01-01,st_ocean=2.5`. grist resolves each value to a
+  position against the dimension's indexing variable when it opens the
+  array, so rows stay valid when a store is rebuilt or extended and its
+  positions shift. Time values are ISO dates matched at day resolution
+  against the decoded time axis; numeric values match the coordinate
+  within a relative tolerance of 1e-6. No match, or more than one, is an
+  error, never a guess. Integer positions are deliberately not part of
+  the contract: a position is only true for one build of a store. The
+  two remaining dimensions must be the spatial ones.
 
 Rules:
 
@@ -85,7 +93,8 @@ Rules:
 
 Status: grist reads the classic shape today. The mdim shape is the
 specified next read path; its first user is BRAN through the bluelink
-mdim VRT.
+mdim VRT, surface level only to start (each added depth level
+multiplies the row count).
 
 ## Onboarding ritual for a NEW source
 
