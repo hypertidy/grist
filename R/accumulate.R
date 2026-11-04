@@ -13,6 +13,9 @@ accumulate_date <- function(dsn, date, source, registry, band = 1L,
   if (file.exists(out) && !overwrite) return(invisible(out))
 
   meta <- check_mapping(source, mapping_path)
+  tname <- if (is.null(source$transform)) "identity" else source$transform
+  tf <- grist_transforms[[tname]]
+  stopifnot(is.function(tf))
   nreg <- nrow(registry)
   acc <- matrix(0, nreg, 4L,
                 dimnames = list(NULL, c("n", "sumw", "sumwx", "sumwx2")))
@@ -30,6 +33,7 @@ accumulate_date <- function(dsn, date, source, registry, band = 1L,
     m <- readRDS(file.path(mapping_path, sprintf("band_%04i.rds", b)))
     v <- read_rows(dsn, m$rows, source$grid, band = band)
     stopifnot(length(v) == length(m$idx))
+    v <- tf(v)
     fin <- is.finite(v)
     x <- ifelse(fin, v, 0)
     s <- rowsum(cbind(as.double(fin), m$w * fin, m$w * x, m$w * x * x),
@@ -53,6 +57,7 @@ accumulate_date <- function(dsn, date, source, registry, band = 1L,
   tab <- arrow::arrow_table(d)
   tab$metadata$grist_dsn <- as.character(dsn)
   tab$metadata$grist_band <- as.character(band)
+  tab$metadata$grist_transform <- tname
   arrow::write_parquet(tab, tmp)
   file.rename(tmp, out)
   invisible(out)

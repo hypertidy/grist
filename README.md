@@ -29,15 +29,21 @@ squares per equal-area bin, since SeaWiFS 1997); see the
 
 ## The contract
 
-A source is three things:
+A source is a name, a catalog, a grid and (optionally) a transform:
 
-    stat_source(name, files, grid = NULL)
+    stat_source(name, files, grid = NULL, transform = "identity")
 
 - `name`: the slug that keys `mapping/<name>/` and `sums/<name>/`
 - `files`: a catalog, one row per date (see "Catalog contract" below).
 - `grid`: the native grid signature (dimension, extent), stamped from
   the first catalog entry unless supplied. Supply it explicitly when a
   driver does not report a correct extent.
+- `transform` (optional, default `"identity"`): a named value transform
+  applied before summing, from `grist_transforms`. `"log10"` is for
+  lognormal quantities such as chlorophyll-a: the sums are then of
+  log10(x), so cell means are geometric means. Each sums file records
+  its transform (Parquet metadata `grist_transform`); a different
+  transform is a different source, with its own name.
 
 The grid signature is the contract between the mapping and the daily
 reads: `accumulate_date()` refuses to run against a mismatched

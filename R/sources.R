@@ -20,17 +20,36 @@ grid_from_dsn <- function(dsn, band = 1L) {
 #' stamped from the first catalog entry unless supplied -- supply it
 #' explicitly when the driver does not report a correct extent (some
 #' array stores), and ALWAYS verify a new source with an oracle date
-#' before any backfill (see README: onboarding ritual).
-stat_source <- function(name, files, grid = NULL) {
+#' before any backfill (see README: onboarding ritual). transform names
+#' an entry of grist_transforms (default "identity").
+stat_source <- function(name, files, grid = NULL, transform = "identity") {
   stopifnot(is.character(name), nchar(name) > 0,
-            all(c("date", "dsn") %in% names(files)))
+            all(c("date", "dsn") %in% names(files)),
+            transform %in% names(grist_transforms))
 
   if (!"band" %in% names(files)) files$band <- 1L
   files <- files[c("date", "dsn", "band")]
   if (is.null(grid)) grid <- grid_from_dsn(files$dsn[1], files$band[1])
   stopifnot(length(grid$dimension) == 2L, length(grid$extent) == 4L)
-  list(name = name, files = files, grid = grid)
+  list(name = name, files = files, grid = grid, transform = transform)
 }
+
+#' Value transforms applied to each pixel before it is summed.
+#'
+#' Named, not arbitrary functions, so a sums file can record which one
+#' it was computed with (Parquet metadata grist_transform). A source's
+#' transform is part of what its sums mean: changing it is a new source
+#' (a new name), not a recompute. Values the transform makes non-finite
+#' (log10 of zero or a negative) are dropped like any NA pixel.
+#'
+#' identity  the value as read
+#' log10     for lognormal quantities such as chlorophyll-a: sums of
+#'           log10(x) and its square give geometric means and log-space
+#'           variances
+grist_transforms <- list(
+  identity = function(v) v,
+  log10 = function(v) suppressWarnings(log10(v))
+)
 
 #' Read a contiguous block of rows (GDAL order, row 1 = top) of one
 #' band at native resolution: a window read, no reprojection.
