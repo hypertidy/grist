@@ -15,10 +15,11 @@ Description: The engine extracted from trend.sst: area-weighted daily
 License: MIT + file LICENSE
 Encoding: UTF-8
 Imports: s2, vapour, vaster, arrow, dplyr
-Suggests: mirai, jsonlite
+Suggests: mirai, jsonlite, gdalraster, testthat
 Collate:
     'cells.R'
     'sources.R'
+    'mdim.R'
     'mapping.R'
     'accumulate.R'
     'series.R'

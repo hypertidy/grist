@@ -7,7 +7,16 @@
 accumulate_date <- function(dsn, date, source, registry, band = 1L,
                             overwrite = FALSE,
                             mapping_path = file.path("mapping", source$name),
-                            out_path = file.path("sums", source$name)) {
+                            out_path = file.path("sums", source$name),
+                            array = NULL, index = NULL, view = NULL) {
+  mdim <- identical(source$shape, "mdim")
+  if (mdim && (is.null(array) || is.null(view))) {
+    ## look the row up by date when called directly (oracle, one date)
+    i <- match(as.Date(date), as.Date(source$files$date))
+    stopifnot(!is.na(i))
+    array <- source$files$array[i]; index <- source$files$index[i]
+    view <- source$files$view[i]
+  }
   dir.create(out_path, recursive = TRUE, showWarnings = FALSE)
   out <- file.path(out_path, sprintf("%s.parquet", format(as.Date(date))))
   if (file.exists(out) && !overwrite) return(invisible(out))
@@ -29,9 +38,14 @@ accumulate_date <- function(dsn, date, source, registry, band = 1L,
   vapour::vapour_set_config("GDAL_HTTP_TIMEOUT", "120")
   vapour::vapour_set_config("GDAL_HTTP_MAX_RETRY", "3")
   vapour::vapour_set_config("GDAL_HTTP_RETRY_DELAY", "5")
+  if (mdim) {
+    ds <- mdim_open(dsn, array, view)
+    on.exit(ds$close(), add = TRUE)
+  }
   for (b in seq_len(meta$n_bands)) {
     m <- readRDS(file.path(mapping_path, sprintf("band_%04i.rds", b)))
-    v <- read_rows(dsn, m$rows, source$grid, band = band)
+    v <- if (mdim) read_rows_mdim(ds, m$rows, source$grid)
+         else read_rows(dsn, m$rows, source$grid, band = band)
     stopifnot(length(v) == length(m$idx))
     v <- tf(v)
     fin <- is.finite(v)
@@ -56,7 +70,12 @@ accumulate_date <- function(dsn, date, source, registry, band = 1L,
   ## since changed (NRT -> delayed-time, provisional -> final)
   tab <- arrow::arrow_table(d)
   tab$metadata$grist_dsn <- as.character(dsn)
-  tab$metadata$grist_band <- as.character(band)
+  if (mdim) {
+    tab$metadata$grist_array <- as.character(array)
+    tab$metadata$grist_index <- as.character(index)
+  } else {
+    tab$metadata$grist_band <- as.character(band)
+  }
   tab$metadata$grist_transform <- tname
   arrow::write_parquet(tab, tmp)
   file.rename(tmp, out)
