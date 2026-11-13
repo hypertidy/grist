@@ -119,3 +119,12 @@ test_that("partial grids override the stamp; WKT passes through", {
   expect_identical(as_wkt(""), "")
   expect_identical(as_wkt(NA_character_), "")
 })
+
+test_that("workers get a slim source: same columns, no rows", {
+  src <- list(name = "x", files = data.frame(date = Sys.Date() + 0:9, dsn = "a",
+                                             array = "z", index = "i", view = "[0,:,:]"))
+  sl <- slim_source(src)
+  expect_equal(nrow(sl$files), 0L)
+  expect_equal(names(sl$files), names(src$files))
+  expect_lt(object.size(sl), object.size(src))
+})

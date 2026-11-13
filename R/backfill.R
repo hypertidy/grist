@@ -61,6 +61,13 @@ plan_dates <- function(source, out_path = file.path("sums", source$name),
   pl[todo, ]
 }
 
+#' A source with an empty catalog (same columns), for shipping to
+#' workers that are always given their row explicitly.
+slim_source <- function(source) {
+  source$files <- source$files[0L, , drop = FALSE]
+  source
+}
+
 #' Run a plan: serial, or parallel via mirai when workers > 1.
 #' Failures write nothing and are reported, never fatal; rerun to
 #' continue. Returns the plan it ran (invisibly).
@@ -87,6 +94,12 @@ backfill <- function(source, registry, workers = 1L,
     invisible(NULL)
   }
 
+  ## workers get the source WITHOUT its catalog: each task is handed its
+  ## own row (dsn, date, band / array, index, view), and the catalog rides
+  ## along in .args of every queued task -- a 17531-row mdim catalog is a
+  ## few MB, times every queued task, held by the host (an OOM at 96 GB in
+  ## the first sea ice backfill; one worker itself is flat at ~350 MB)
+  source <- slim_source(source)
   if (workers > 1L) {
     mirai::daemons(workers)
     on.exit(mirai::daemons(0), add = TRUE)
