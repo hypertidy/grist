@@ -109,3 +109,13 @@ test_that("dimension names from either JSON form", {
   expect_equal(dims_from_json(c("/time", "/y", "/x")), c("time", "y", "x"))
   expect_equal(dims_from_json(list(list(name = "time"), list(name = "y"))), c("time", "y"))
 })
+
+test_that("partial grids override the stamp; WKT passes through", {
+  expect_false(is_full_grid(NULL))
+  expect_false(is_full_grid(list(projection = "EPSG:3412")))
+  expect_true(is_full_grid(list(dimension = c(2L, 2L), extent = c(0, 1, 0, 1))))
+  w <- 'PROJCRS["x"]'
+  expect_identical(as_wkt(w), w)
+  expect_identical(as_wkt(""), "")
+  expect_identical(as_wkt(NA_character_), "")
+})

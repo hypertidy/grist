@@ -18,10 +18,12 @@ grid_from_dsn <- function(dsn, band = 1L) {
 #' Two catalog shapes (see README, "Catalog contract"):
 #'   classic: date, dsn[, band]           read with GDAL's classic API
 #'   mdim:    date, dsn, array, index     read with the multidim API
-#' grid is stamped from the first catalog entry unless supplied --
-#' supply it explicitly when the driver does not report a correct
-#' extent (some array stores), and ALWAYS verify a new source with an
-#' oracle date before any backfill (see README: onboarding ritual).
+#' grid is stamped from the first catalog entry; a supplied grid (or
+#' any part of one, e.g. list(projection = "EPSG:3412") for a store
+#' that does not carry its CRS) overrides the stamped entries. A
+#' projection given as an authority code or PROJ string is expanded to
+#' WKT. ALWAYS verify a new source with an oracle date before any
+#' backfill (see README: onboarding ritual).
 #' transform names an entry of grist_transforms (default "identity").
 #' For the mdim shape every row's index is resolved to positions once,
 #' here (column view); an index that does not resolve exactly is an
@@ -36,17 +38,31 @@ stat_source <- function(name, files, grid = NULL, transform = "identity") {
   if (shape == "classic") {
     if (!"band" %in% names(files)) files$band <- 1L
     files <- files[c("date", "dsn", "band")]
-    if (is.null(grid)) grid <- grid_from_dsn(files$dsn[1], files$band[1])
+    if (!is_full_grid(grid)) grid <- utils::modifyList(grid_from_dsn(files$dsn[1], files$band[1]), as.list(grid))
   } else {
     files <- files[c("date", "dsn", "array", "index")]
     files$view <- resolve_views(files)
     files$band <- 1L
-    if (is.null(grid)) grid <- grid_from_mdim(files$dsn[1], files$array[1], files$view[1])
+    if (!is_full_grid(grid)) grid <- utils::modifyList(grid_from_mdim(files$dsn[1], files$array[1], files$view[1]), as.list(grid))
   }
   stopifnot(length(grid$dimension) == 2L, length(grid$extent) == 4L)
+  grid$projection <- as_wkt(grid$projection)
   grid$projected <- is_projected(grid$projection)
   list(name = name, files = files, grid = grid, transform = transform,
        shape = shape)
+}
+
+is_full_grid <- function(grid) {
+  !is.null(grid) && all(c("dimension", "extent") %in% names(grid))
+}
+
+#' A CRS as WKT: WKT is kept, an authority code or PROJ string is
+#' expanded (needs gdalraster), empty stays empty.
+as_wkt <- function(x) {
+  if (is.null(x) || length(x) != 1L || is.na(x) || !nzchar(x)) return("")
+  if (grepl("^\\s*(PROJ|GEOG|GEOD|COMPOUND|BOUND|VERT|ENGCRS|GEOCCS)", x, perl = TRUE)) return(x)
+  need_gdalraster()
+  gdalraster::srs_to_wkt(x)
 }
 
 #' TRUE for a projected CRS (WKT), FALSE for geographic or none.
