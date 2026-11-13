@@ -101,3 +101,11 @@ test_that("pixel areas on the sphere: NSIDC 25 km south polar grid", {
   aa <- pixel_area_km2(g$x, g$y, 25000, 25000, wkt)
   expect_lt(diff(range(aa)) / mean(aa), 0.01)
 })
+
+test_that("dimension names from either JSON form", {
+  tab <- data.frame(name = c("time", "y", "x"), full_name = c("/time", "/y", "/x"),
+                    size = c(17531, 332, 316))
+  expect_equal(dims_from_json(tab), c("time", "y", "x"))
+  expect_equal(dims_from_json(c("/time", "/y", "/x")), c("time", "y", "x"))
+  expect_equal(dims_from_json(list(list(name = "time"), list(name = "y"))), c("time", "y"))
+})

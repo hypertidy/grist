@@ -68,15 +68,25 @@ mdim_json <- function(dsn, array, detailed = FALSE) {
 mdim_coord <- function(dsn, dim) {
   j <- mdim_json(dsn, dim, detailed = TRUE)
   v <- unlist(j$values)
+  if (is.null(v)) stop(sprintf("no values for coordinate '%s' in %s", dim, dsn), call. = FALSE)
   u <- j$unit %||% (j$attributes$units %||% "")
-  if (is.list(u)) u <- unlist(u)[1]
+  if (is.list(u) || length(u) > 1) u <- as.character(unlist(u))[1]
   if (grepl("since", u)) cf_dates(v, u) else as.numeric(v)
 }
 
 #' Dimension names (no group path) of an array, in array order.
 mdim_dims <- function(dsn, array) {
-  j <- mdim_json(dsn, array)
-  sub(".*/", "", unlist(j$dimensions))
+  dims_from_json(mdim_json(dsn, array)$dimensions)
+}
+
+#' The dimensions entry of gdalmdiminfo JSON is either full names
+#' ("/time", ...) or, as gdalraster returns it, a table of objects with
+#' name, full_name, size, type: names in array order either way.
+dims_from_json <- function(d) {
+  if (is.data.frame(d)) d <- if (!is.null(d$name)) d$name else d$full_name
+  else if (is.list(d)) d <- vapply(d, function(x)
+    if (is.list(x)) (x$name %||% x$full_name) else as.character(x), "")
+  sub(".*/", "", as.character(d))
 }
 
 #' Resolve every catalog row's index to a view expression, once per
