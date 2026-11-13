@@ -15,23 +15,60 @@ grid_from_dsn <- function(dsn, band = 1L) {
 
 #' Construct a source from a catalog.
 #'
-#' files must have columns date and dsn; an optional band column
-#' (integer, default 1) selects the band read for that date. grid is
-#' stamped from the first catalog entry unless supplied -- supply it
-#' explicitly when the driver does not report a correct extent (some
-#' array stores), and ALWAYS verify a new source with an oracle date
-#' before any backfill (see README: onboarding ritual). transform names
-#' an entry of grist_transforms (default "identity").
+#' Two catalog shapes (see README, "Catalog contract"):
+#'   classic: date, dsn[, band]           read with GDAL's classic API
+#'   mdim:    date, dsn, array, index     read with the multidim API
+#' grid is stamped from the first catalog entry; a supplied grid (or
+#' any part of one, e.g. list(projection = "EPSG:3412") for a store
+#' that does not carry its CRS) overrides the stamped entries. A
+#' projection given as an authority code or PROJ string is expanded to
+#' WKT. ALWAYS verify a new source with an oracle date before any
+#' backfill (see README: onboarding ritual).
+#' transform names an entry of grist_transforms (default "identity").
+#' For the mdim shape every row's index is resolved to positions once,
+#' here (column view); an index that does not resolve exactly is an
+#' error.
 stat_source <- function(name, files, grid = NULL, transform = "identity") {
   stopifnot(is.character(name), nchar(name) > 0,
             all(c("date", "dsn") %in% names(files)),
             transform %in% names(grist_transforms))
+  files <- as.data.frame(files)
+  shape <- if (all(c("array", "index") %in% names(files))) "mdim" else "classic"
 
-  if (!"band" %in% names(files)) files$band <- 1L
-  files <- files[c("date", "dsn", "band")]
-  if (is.null(grid)) grid <- grid_from_dsn(files$dsn[1], files$band[1])
+  if (shape == "classic") {
+    if (!"band" %in% names(files)) files$band <- 1L
+    files <- files[c("date", "dsn", "band")]
+    if (!is_full_grid(grid)) grid <- utils::modifyList(grid_from_dsn(files$dsn[1], files$band[1]), as.list(grid))
+  } else {
+    files <- files[c("date", "dsn", "array", "index")]
+    files$view <- resolve_views(files)
+    files$band <- 1L
+    if (!is_full_grid(grid)) grid <- utils::modifyList(grid_from_mdim(files$dsn[1], files$array[1], files$view[1]), as.list(grid))
+  }
   stopifnot(length(grid$dimension) == 2L, length(grid$extent) == 4L)
-  list(name = name, files = files, grid = grid, transform = transform)
+  grid$projection <- as_wkt(grid$projection)
+  grid$projected <- is_projected(grid$projection)
+  list(name = name, files = files, grid = grid, transform = transform,
+       shape = shape)
+}
+
+is_full_grid <- function(grid) {
+  !is.null(grid) && all(c("dimension", "extent") %in% names(grid))
+}
+
+#' A CRS as WKT: WKT is kept, an authority code or PROJ string is
+#' expanded (needs gdalraster), empty stays empty.
+as_wkt <- function(x) {
+  if (is.null(x) || length(x) != 1L || is.na(x) || !nzchar(x)) return("")
+  if (grepl("^\\s*(PROJ|GEOG|GEOD|COMPOUND|BOUND|VERT|ENGCRS|GEOCCS)", x, perl = TRUE)) return(x)
+  need_gdalraster()
+  gdalraster::srs_to_wkt(x)
+}
+
+#' TRUE for a projected CRS (WKT), FALSE for geographic or none.
+is_projected <- function(wkt) {
+  !is.null(wkt) && length(wkt) == 1L && !is.na(wkt) &&
+    grepl("^\\s*PROJ(CRS|CS|ECTEDCRS)\\b", wkt, perl = TRUE)
 }
 
 #' Value transforms applied to each pixel before it is summed.
@@ -46,9 +83,17 @@ stat_source <- function(name, files, grid = NULL, transform = "identity") {
 #' log10     for lognormal quantities such as chlorophyll-a: sums of
 #'           log10(x) and its square give geometric means and log-space
 #'           variances
+#' unit_interval  a fraction in [0, 1] (sea ice concentration as stored
+#'           by the NSIDC CDR); anything outside, such as the CDR's flag
+#'           values (pole hole, land, coast, lake, missing: 2.51..2.55
+#'           after scaling), is dropped
+#' percent_unit  a percentage in [0, 100] (e.g. Bremen ASI) as a fraction
+#'           in [0, 1]; anything outside is dropped
 grist_transforms <- list(
   identity = function(v) v,
-  log10 = function(v) suppressWarnings(log10(v))
+  log10 = function(v) suppressWarnings(log10(v)),
+  unit_interval = function(v) { v[!is.na(v) & (v < 0 | v > 1)] <- NA; v },
+  percent_unit = function(v) { v[!is.na(v) & (v < 0 | v > 100)] <- NA; v / 100 }
 )
 
 #' Read a contiguous block of rows (GDAL order, row 1 = top) of one

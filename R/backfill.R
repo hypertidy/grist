@@ -6,14 +6,26 @@
 ## consumed by any external runtime. Re-planning after any partial run
 ## yields exactly the remaining work.
 
-#' The source recorded in a sums file (dsn and band), or NA when the
-#' file predates provenance recording or can't be read.
+#' The source recorded in a sums file -- dsn and band (classic) or dsn,
+#' array and index (mdim) -- or NA when the file predates provenance
+#' recording or can't be read. Compared with source_key().
 recorded_source <- function(f) {
   tryCatch({
     m <- arrow::ParquetFileReader$create(f)$GetSchema()$metadata
     if (is.null(m$grist_dsn)) NA_character_
+    else if (!is.null(m$grist_array))
+      paste(m$grist_dsn, m$grist_array, m$grist_index, sep = "\r")
     else paste(m$grist_dsn, m$grist_band %||% "1", sep = "\r")
   }, error = function(e) NA_character_)
+}
+
+#' What each catalog row reads, as recorded in sums provenance. For the
+#' mdim shape the index VALUE is the identity, never the resolved
+#' position (positions shift when a store is rebuilt).
+source_key <- function(files) {
+  if (all(c("array", "index") %in% names(files)))
+    paste(files$dsn, files$array, files$index, sep = "\r")
+  else paste(files$dsn, files$band, sep = "\r")
 }
 
 `%||%` <- function(a, b) if (is.null(a)) b else a
@@ -33,14 +45,27 @@ plan_dates <- function(source, out_path = file.path("sums", source$name),
   have <- file.exists(out)
   reason <- ifelse(have, "", "missing")
   if (changed && any(have)) {
-    want <- paste(files$dsn, files$band, sep = "\r")
+    want <- source_key(files)
     rec <- vapply(out[have], recorded_source, "", USE.NAMES = FALSE)
     stale <- !is.na(rec) & rec != want[have]
     reason[which(have)[stale]] <- "changed"
   }
   todo <- nzchar(reason)
-  data.frame(date = as.Date(files$date), dsn = files$dsn,
-             band = files$band, out = out, reason = reason)[todo, ]
+  pl <- data.frame(date = as.Date(files$date), dsn = files$dsn,
+                   band = files$band, out = out, reason = reason)
+  if (!is.null(files$view)) {
+    pl$array <- files$array; pl$index <- files$index; pl$view <- files$view
+  } else {
+    pl$array <- NA_character_; pl$index <- NA_character_; pl$view <- NA_character_
+  }
+  pl[todo, ]
+}
+
+#' A source with an empty catalog (same columns), for shipping to
+#' workers that are always given their row explicitly.
+slim_source <- function(source) {
+  source$files <- source$files[0L, , drop = FALSE]
+  source
 }
 
 #' Run a plan: serial, or parallel via mirai when workers > 1.
@@ -56,28 +81,37 @@ backfill <- function(source, registry, workers = 1L,
                   workers))
   if (nrow(pl) == 0) return(invisible(pl))
 
-  do_one <- function(dsn, date, band, source, registry,
+  do_one <- function(dsn, date, band, array, index, view, source, registry,
                      mapping_path, out_path) {
+    na2null <- function(x) if (is.na(x)) NULL else x
     res <- try(accumulate_date(dsn, date, source, registry, band = band,
                                overwrite = TRUE,
                                mapping_path = mapping_path,
-                               out_path = out_path), silent = TRUE)
+                               out_path = out_path,
+                               array = na2null(array), index = na2null(index),
+                               view = na2null(view)), silent = TRUE)
     if (inherits(res, "try-error")) message(sprintf("FAIL %s", format(date)))
     invisible(NULL)
   }
 
+  ## workers get the source WITHOUT its catalog: each task is handed its
+  ## own row (dsn, date, band / array, index, view), and the catalog rides
+  ## along in .args of every queued task -- a 17531-row mdim catalog is a
+  ## few MB, times every queued task, held by the host (an OOM at 96 GB in
+  ## the first sea ice backfill; one worker itself is flat at ~350 MB)
+  source <- slim_source(source)
   if (workers > 1L) {
     mirai::daemons(workers)
     on.exit(mirai::daemons(0), add = TRUE)
     mirai::everywhere(library(grist))
-    res <- mirai::mirai_map(pl[c("dsn", "date", "band")], do_one,
+    res <- mirai::mirai_map(pl[c("dsn", "date", "band", "array", "index", "view")], do_one,
       .args = list(source = source, registry = registry,
                    mapping_path = mapping_path,
                    out_path = out_path))[mirai::.progress]
   } else {
     for (i in seq_len(nrow(pl))) {
-      do_one(pl$dsn[i], pl$date[i], pl$band[i], source, registry,
-             mapping_path, out_path)
+      do_one(pl$dsn[i], pl$date[i], pl$band[i], pl$array[i], pl$index[i],
+             pl$view[i], source, registry, mapping_path, out_path)
       if (i %% 500 == 0) message(sprintf("%i / %i", i, nrow(pl)))
     }
   }

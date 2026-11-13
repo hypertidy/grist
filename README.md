@@ -41,7 +41,9 @@ A source is a name, a catalog, a grid and (optionally) a transform:
 - `transform` (optional, default `"identity"`): a named value transform
   applied before summing, from `grist_transforms`. `"log10"` is for
   lognormal quantities such as chlorophyll-a: the sums are then of
-  log10(x), so cell means are geometric means. Each sums file records
+  log10(x), so cell means are geometric means. `"unit_interval"` keeps
+  fractions in [0, 1] and drops everything else (the NSIDC CDR's flag
+  values); `"percent_unit"` takes a percentage in [0, 100] to a fraction. Each sums file records
   its transform (Parquet metadata `grist_transform`); a different
   transform is a different source, with its own name.
 
@@ -97,10 +99,31 @@ Rules:
   `GDAL_LOAD_EXTRA_DIM_METADATA_DELAY=0`, `GDAL_PAM_ENABLED=NO`, and
   workers equal to allocated CPUs.
 
-Status: grist reads the classic shape today. The mdim shape is the
-specified next read path; its first user is BRAN through the bluelink
-mdim VRT, surface level only to start (each added depth level
-multiplies the row count).
+The mdim shape is read with gdalraster (`mdim_info()` to resolve index
+values once per (dsn, array) at `stat_source()` time, `mdim_as_classic()`
+with a view expression for each date). The values are scaled by the
+array's scale/offset and its nodata becomes NA before any transform, and
+a store with increasing y (south-up) is read so that row 1 is always the
+top of the grid. Provenance for an mdim row is (dsn, array, index VALUE),
+never the resolved position. First users: the NSIDC CDR and Bremen ASI
+sea ice concentration indexes (grist catalogs published beside each
+index on source.coop).
+
+## Grids: geographic and projected
+
+The mapping assigns each pixel whole to the cell containing its centre.
+
+- Geographic (lon/lat) grids: weight cos(latitude), a relative area, as
+  in the reference deployment.
+- Projected grids (e.g. polar stereographic): pixel centres are taken to
+  lon/lat with the grid's CRS and the weight is the pixel's area on the
+  sphere in km2 (s2 area of its four corners). sumw is then covered
+  area, and for a concentration sumwx is the area it implies (sea ice
+  area, km2). Needs gdalraster for the transform.
+
+The weight kind is recorded in the mapping's metadata (`coslat` or
+`area_km2`). Means are unaffected by the unit; sums of sumw across sources
+with different weight kinds are not comparable.
 
 ## Onboarding ritual for a NEW source
 
