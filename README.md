@@ -3,9 +3,10 @@
 Mergeable sufficient statistics on S2 cells from daily grids. This is
 the engine extracted from [trend.sst](https://github.com/mdsumner/trend.sst),
 which remains the reference deployment; this package is the invariant
-middle that new deployments (sea level anomaly, ice, ocean colour, ...)
-share, while each host repository owns its own product knowledge:
-catalogs, schedules, buckets, baselines, regions, and site.
+middle that the deployments share (sea surface temperature, sea level
+anomaly, ocean colour, sea ice; see "Deployments" below), while each
+host repository owns its own product knowledge: catalogs, schedules,
+buckets, baselines, regions, and site.
 
 ## The model
 
@@ -107,7 +108,7 @@ a store with increasing y (south-up) is read so that row 1 is always the
 top of the grid. Provenance for an mdim row is (dsn, array, index VALUE),
 never the resolved position. First users: the NSIDC CDR and Bremen ASI
 sea ice concentration indexes (grist catalogs published beside each
-index on source.coop).
+index on source.coop), in [trend.ice](https://github.com/mdsumner/trend.ice).
 
 ## Grids: geographic and projected
 
@@ -151,6 +152,20 @@ array or any external runtime in any language. The filesystem is the
 resume state (file-per-date, atomic writes), never the scheduler:
 re-planning after any partial run yields exactly the remaining work.
 
+Long runs can recycle their workers: `backfill(..., chunk = 1000)` runs
+the plan in pieces with fresh mirai daemons for each, which bounds any
+per-process memory growth in the read path (the first full sea ice
+backfill, mdim reads over remote netCDF, grew per date until it was
+killed; chunked, it stays flat). Workers ship a slim source (no
+catalog); each task carries only its own row.
+
+Remote reads at scale are the fragile part. Reading the sea ice netCDF
+from the provider's server ran at about 1000 dates per hour with
+occasional worker crashes; the same index remapped to a scratch copy in
+object storage beside the compute ran at about 1000 dates per minute
+with none. The catalog makes that a host decision: point the `dsn`
+column (or the index it references) at the mirror.
+
 Each sums file records the source it was computed from (`dsn` and
 `band`, in the Parquet key-value metadata). `plan_dates()` treats a
 date as still to do when its file is missing OR when the catalog now
@@ -159,6 +174,23 @@ a near-real-time product with delayed-time data, or provisional files
 with their final versions, gets exactly the handed-over dates
 recomputed on the next run, with no manual deletion of trailing days.
 Files written before provenance was recorded are trusted as they are.
+
+## Deployments
+
+Each deployment is a host repository holding product knowledge only;
+sums, mapping, catalog and `manifest.json` are published to Pawsey
+Acacia (`s3://aad-derived/<prefix>/`, endpoint
+https://projects.pawsey.org.au, anonymous read).
+
+| host | quantity | source | catalog shape | grid | transform | prefix |
+|---|---|---|---|---|---|---|
+| [trend.sst](https://github.com/mdsumner/trend.sst) | sea surface temperature (reference deployment) | NOAA OISST; GHRSST MUR | classic | geographic | identity | `trend-sst/` |
+| [trend.sla](https://github.com/mdsumner/trend.sla) | sea level anomaly | CMEMS DUACS L4 ARCO Zarr (delayed-time, then near-real-time) | classic | geographic | identity | `trend-sla/` |
+| [trend.chl](https://github.com/mdsumner/trend.chl) | chlorophyll-a (5-day) | ESA OC-CCI v6.0 COGs | classic | geographic | log10 | `trend-chl/` |
+| [trend.ice](https://github.com/mdsumner/trend.ice) | sea ice concentration | NSIDC CDR G02202 v6 (25 km); Bremen ASI AMSR2 (3.125 km) | mdim | polar stereographic | unit_interval; percent_unit | `trend-ice/s2/` |
+
+trend.ice is the first deployment on the mdim catalog shape and a
+projected grid (area weights in km2, so `sumwx` is sea ice area).
 
 ## What host repositories own
 

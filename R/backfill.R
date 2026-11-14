@@ -71,15 +71,30 @@ slim_source <- function(source) {
 #' Run a plan: serial, or parallel via mirai when workers > 1.
 #' Failures write nothing and are reported, never fatal; rerun to
 #' continue. Returns the plan it ran (invisibly).
+#'
+#' chunk (optional): run the plan in pieces of at most this many dates,
+#' with fresh workers for each piece (daemons started and stopped per
+#' chunk). Bounds per-process memory growth in the read path: the first
+#' full sea ice backfill (trend.ice, mdim reads over remote netCDF) grew
+#' steadily per date until OOM; recycling every 1000 dates kept it flat.
+#' NULL (default) runs the whole plan with one set of workers.
 backfill <- function(source, registry, workers = 1L,
                      mapping_path = file.path("mapping", source$name),
-                     out_path = file.path("sums", source$name)) {
+                     out_path = file.path("sums", source$name),
+                     chunk = NULL) {
+  if (!is.null(chunk)) {
+    chunk <- as.integer(chunk)
+    stopifnot(length(chunk) == 1L, !is.na(chunk), chunk > 0L)
+  }
   pl <- plan_dates(source, out_path)
-  message(sprintf("[%s] %i of %i dates to do (%i missing, %i source changed; %i workers)",
+  message(sprintf("[%s] %i of %i dates to do (%i missing, %i source changed; %i workers%s)",
                   source$name, nrow(pl), nrow(source$files),
                   sum(pl$reason == "missing"), sum(pl$reason == "changed"),
-                  workers))
+                  workers,
+                  if (is.null(chunk)) "" else sprintf(", chunks of %i", chunk)))
   if (nrow(pl) == 0) return(invisible(pl))
+  pieces <- if (is.null(chunk)) list(seq_len(nrow(pl))) else
+    split(seq_len(nrow(pl)), ceiling(seq_len(nrow(pl)) / chunk))
 
   do_one <- function(dsn, date, band, array, index, view, source, registry,
                      mapping_path, out_path) {
@@ -100,20 +115,28 @@ backfill <- function(source, registry, workers = 1L,
   ## few MB, times every queued task, held by the host (an OOM at 96 GB in
   ## the first sea ice backfill; one worker itself is flat at ~350 MB)
   source <- slim_source(source)
-  if (workers > 1L) {
-    mirai::daemons(workers)
-    on.exit(mirai::daemons(0), add = TRUE)
-    mirai::everywhere(library(grist))
-    res <- mirai::mirai_map(pl[c("dsn", "date", "band", "array", "index", "view")], do_one,
-      .args = list(source = source, registry = registry,
-                   mapping_path = mapping_path,
-                   out_path = out_path))[mirai::.progress]
-  } else {
-    for (i in seq_len(nrow(pl))) {
-      do_one(pl$dsn[i], pl$date[i], pl$band[i], pl$array[i], pl$index[i],
-             pl$view[i], source, registry, mapping_path, out_path)
-      if (i %% 500 == 0) message(sprintf("%i / %i", i, nrow(pl)))
+  if (workers > 1L) on.exit(mirai::daemons(0), add = TRUE)
+  for (k in seq_along(pieces)) {
+    pk <- pl[pieces[[k]], , drop = FALSE]
+    if (length(pieces) > 1L)
+      message(sprintf("[%s] chunk %i / %i (%i dates)", source$name, k,
+                      length(pieces), nrow(pk)))
+    if (workers > 1L) {
+      mirai::daemons(workers)
+      mirai::everywhere(library(grist))
+      res <- mirai::mirai_map(pk[c("dsn", "date", "band", "array", "index", "view")], do_one,
+        .args = list(source = source, registry = registry,
+                     mapping_path = mapping_path,
+                     out_path = out_path))[mirai::.progress]
+      mirai::daemons(0)
+    } else {
+      for (i in seq_len(nrow(pk))) {
+        do_one(pk$dsn[i], pk$date[i], pk$band[i], pk$array[i], pk$index[i],
+               pk$view[i], source, registry, mapping_path, out_path)
+        if (i %% 500 == 0) message(sprintf("%i / %i", i, nrow(pk)))
+      }
     }
+    gc()
   }
 
   ## pulse check: never fatal -- a backfill that completed must not be
