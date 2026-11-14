@@ -153,11 +153,11 @@ resume state (file-per-date, atomic writes), never the scheduler:
 re-planning after any partial run yields exactly the remaining work.
 
 Long runs can recycle their workers: `backfill(..., chunk = 1000)` runs
-the plan in pieces with fresh mirai daemons for each, which bounds any
-per-process memory growth in the read path (the first full sea ice
-backfill, mdim reads over remote netCDF, grew per date until it was
-killed; chunked, it stays flat). Workers ship a slim source (no
-catalog); each task carries only its own row.
+the plan in pieces with fresh mirai daemons for each, which caps the
+number of queued tasks and bounds any per-process growth. Workers ship a
+slim source (no catalog); each task carries only its own row. (The first
+full sea ice backfill was OOM-killed because every queued task carried
+the whole catalog, a few MB each; a single worker's memory was flat.)
 
 Remote reads at scale are the fragile part. Reading the sea ice netCDF
 from the provider's server ran at about 1000 dates per hour with

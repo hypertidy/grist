@@ -74,9 +74,10 @@ slim_source <- function(source) {
 #'
 #' chunk (optional): run the plan in pieces of at most this many dates,
 #' with fresh workers for each piece (daemons started and stopped per
-#' chunk). Bounds per-process memory growth in the read path: the first
-#' full sea ice backfill (trend.ice, mdim reads over remote netCDF) grew
-#' steadily per date until OOM; recycling every 1000 dates kept it flat.
+#' chunk). Caps the number of queued tasks and recycles worker processes,
+#' a safety net for long runs. (The first full sea ice backfill was
+#' OOM-killed because every queued task carried the whole catalog; that
+#' is fixed by shipping a slim source. A single worker's memory was flat.)
 #' NULL (default) runs the whole plan with one set of workers.
 backfill <- function(source, registry, workers = 1L,
                      mapping_path = file.path("mapping", source$name),
