@@ -7,6 +7,10 @@ middle that new deployments (sea level anomaly, ice, ocean colour, ...)
 share, while each host repository owns its own product knowledge:
 catalogs, schedules, buckets, baselines, regions, and site.
 
+The deployments and their sites are listed on the
+[trend family page](https://australianantarcticdivision.github.io/trend/)
+([AustralianAntarcticDivision/trend](https://github.com/AustralianAntarcticDivision/trend)).
+
 ## The model
 
 Every source is summarized onto the same discrete global grid: S2
